@@ -31,6 +31,55 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     def state(self, sender="alice", umo="test:FriendMessage:alice"):
         return self.bot.states[json.dumps([umo, sender], ensure_ascii=False)]
 
+    async def test_authorization_without_credentials(self):
+        response, event = await self.send("/trello 授权")
+        self.assertIn("https://trello.com/apps/admin", response)
+        self.assertNotIn("/1/authorize?", response)
+        self.assertFalse(event.llm)
+        self.assertTrue(event.stopped)
+        self.bot.client.verify.assert_not_awaited()
+        self.bot.client.create_card.assert_not_awaited()
+        self.bot.summarizer.generate.assert_not_awaited()
+        self.assertFalse(self.bot.states)
+
+    async def test_authorization_does_not_echo_existing_token(self):
+        self.bot.config.update(api_key="demo-key", token="private-test-token")
+        response, _ = await self.send("/trello 授权")
+        self.assertIn("https://trello.com/1/authorize?", response)
+        self.assertIn("key=demo-key", response)
+        self.assertNotIn("private-test-token", response)
+        self.assertNotIn("&token=", response)
+        self.bot.client.verify.assert_not_awaited()
+        self.bot.summarizer.generate.assert_not_awaited()
+
+    async def test_authorization_is_admin_only_even_for_allowed_user(self):
+        self.bot.config.update(api_key="demo-key", allowed_users=["alice"])
+        response, _ = await self.send("/trello 授权", admin=False)
+        self.assertIn("仅限 AstrBot 管理员", response)
+        self.assertNotIn("demo-key", response)
+        self.assertNotIn("/1/authorize?", response)
+
+    async def test_authorization_never_returns_link_in_groups(self):
+        self.bot.config.update(api_key="demo-key", enable_group=True)
+        response, _ = await self.send("/trello 授权", private=False)
+        self.assertIn("私聊", response)
+        self.assertNotIn("demo-key", response)
+        self.assertNotIn("/1/authorize?", response)
+        self.bot.client.verify.assert_not_awaited()
+
+    async def test_authorization_preserves_existing_draft(self):
+        await self.send("创建待办：交报告")
+        original = self.state()
+        code = original.code
+        self.bot.summarizer.generate.reset_mock()
+        self.bot.client.verify.reset_mock()
+        await self.send("/trello 授权")
+        self.assertIs(self.state(), original)
+        self.assertEqual(self.state().code, code)
+        self.bot.summarizer.generate.assert_not_awaited()
+        self.bot.client.verify.assert_not_awaited()
+        self.bot.client.create_card.assert_not_awaited()
+
     async def test_unrelated_chat_untouched(self):
         response, event = await self.send("今天聊什么")
         self.assertEqual(response, "")

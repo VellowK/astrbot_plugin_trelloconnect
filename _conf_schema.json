@@ -1,6 +1,6 @@
 {
-  "api_key": {"description": "Trello API Key", "type": "string", "default": "", "hint": "从 Trello Power-Up 管理页面获取。不要在聊天或截图中公开。"},
-  "token": {"description": "Trello 用户 Token", "type": "string", "default": "", "hint": "经 Trello 授权页面生成，需 read,write 权限。保存在 AstrBot 本地配置，勿提交到仓库。"},
+  "api_key": {"description": "Trello API Key", "type": "string", "default": "", "hint": "申请地址 https://trello.com/apps/admin 。创建或选择 Power-Up，在 Trello Auth / API Key 页生成 Key（无需 Application Secret）。填入并保存重载后，管理员私聊 /trello 授权 获取授权链接。"},
+  "token": {"description": "Trello 用户 Token", "type": "string", "default": "", "hint": "先填 api_key 并重载，管理员私聊 /trello 授权，点击链接允许 read,write 权限，将页面显示的 Token 复制到此处并重载（有效期 30 天）。不要把 Token 发给 Bot；不会自动回填。说明 https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/"},
   "workspace_id": {"description": "工作区 ID 或短名称", "type": "string", "default": "", "hint": "先填写 API Key/Token，管理员私聊 /trello 工作区 查询。"},
   "board_id": {"description": "看板 ID 或链接", "type": "string", "default": "", "hint": "指定工作区后，管理员 /trello 看板 查询。支持 https://trello.com/b/短代码/名称；必须属于指定工作区。首次正式确认时复用或自动创建 reminder 列表。"},
   "timezone": {"description": "任务时间所在时区", "type": "string", "default": "Asia/Shanghai", "hint": "IANA 时区，如 Asia/Shanghai。自动记录时间；截止时间由用户消息明确指定，不擅自补时刻。"},

@@ -15,6 +15,7 @@ from astrbot.api.message_components import Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from .authorization import authorization_help
 from .images import ImageError, ImageStager
 from .intent import Intent, parse_intent
 from .models import Draft, DraftError, Picture, render_draft
@@ -29,7 +30,9 @@ HELP = """Trello Connect
 • 草稿期间直接说修改意见，或追加图片；不会直接创建。
 • 核对草稿后，单独回复“确认创建 草稿编号”。每次修改编号都会变化。
 • /trello 创建 正文；/trello 取消；/trello 状态；/trello 核对
+• 管理员私聊：/trello 授权（申请地址 / 点击授权链接，Token 需手动填入设置）
 • 管理员：/trello 工作区；/trello 看板；/trello 检查
+API Key 申请：https://trello.com/apps/admin
 在插件设置填写 API Key、Token、工作区 ID 和看板 ID。
 默认仅允许 AstrBot 管理员私聊；普通用户需加入 allowed_users。
 文字/图片会发送给当前会话模型；正式确认后，所选内容与图片上传 Trello。"""
@@ -220,9 +223,13 @@ class TrelloConnectPlugin(Star):
         if action == "cancel":
             self._drop(scope)
             return "已取消本地草稿，未创建新卡片。之前已提交的卡片不会删除。"
-        if action in {"check", "workspaces", "boards"}:
+        if action in {"authorize", "check", "workspaces", "boards"}:
             if not event.is_admin():
                 return "此配置辅助命令仅限 AstrBot 管理员。"
+            if action == "authorize":
+                if not event.is_private_chat():
+                    return "请 AstrBot 管理员私聊发送 /trello 授权，勿在群内发送授权信息或 Token。"
+                return authorization_help(str(self.config.get("api_key", "")))
             if action == "check":
                 target = await self.client.verify()
                 return f"授权可读取目标：{target['label']}\n工作区/看板匹配。reminder 将在首次正式确认时自动创建或复用；写权限以实际提交结果为准。"

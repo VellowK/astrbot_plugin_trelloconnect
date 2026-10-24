@@ -38,17 +38,25 @@ python -m pip install -r data/plugins/astrbot_plugin_trelloconnect/requirements.
 
 ## 首次配置：API Key + 用户 Token
 
-这里的“登录”采用 **Trello API Key + 用户 Token**，不是输入 Trello 账号密码，也不是在插件内打开浏览器 OAuth 登录。工作区和看板通过 ID / 链接配置，不提供动态下拉选择。
+支持 **点击链接授权**，但不是“授权后自动登录”：需要先申请自己的 API Key，再把授权页面显示的 Token 手动填入插件设置。当前版本没有 OAuth 回调接收页面，不会自动回填或续期 Token，也无需提供 Trello 账号密码 / Application Secret。工作区和看板通过 ID / 链接配置，不提供动态下拉选择。
 
-1. 登录 [Trello Power-Up 管理页](https://trello.com/power-ups/admin)，创建或选择一个 Power-Up，在 **API Key** 页面获取 Key。
-2. 在 API Key 页面使用 Token 授权链接，或在浏览器打开以下地址，把 `YOUR_API_KEY` 替换成自己的 Key：
+1. 登录 **[Trello API Key 申请 / 管理地址](https://trello.com/apps/admin)**，创建或选择一个 Power-Up，在 **Trello Auth / API Key** 页面生成 Key。旧版 [Power-Up 管理地址](https://trello.com/power-ups/admin) 也可作为入口。
+2. 在 AstrBot 插件设置填入 `api_key`，保存并重载。以 **AstrBot 管理员身份私聊** Bot，发送：
+
+   ```text
+   /trello 授权
+   ```
+
+   Bot 会生成包含你所配置 Key 的 Trello 授权链接，点击后在 Trello 页面核对账号并允许 **read,write** 权限。默认有效期 **30 天**；不申请 `account` 权限。不需要先填 Token、工作区或看板，也不会调用模型 / 创建卡片。未填 Key 时，该命令会先提供申请地址和步骤；群聊不会返回个人授权链接。
+
+   也可以手动打开以下地址（将 `YOUR_API_KEY` 换成自己的 Key）：
 
    ```text
    https://trello.com/1/authorize?expiration=30days&name=AstrBotTrelloConnect&scope=read,write&response_type=token&key=YOUR_API_KEY
    ```
 
-   确认授权账号、权限和有效期。插件需要 `read,write`；Token 到期后需要重新授权。参考 [Trello API 授权文档](https://developer.atlassian.com/cloud/trello/guides/rest-api/api-introduction/)。
-3. 在 AstrBot 插件设置填写 `api_key`、`token` 并保存 / 重载。**不要把 Token 发给 Bot、提交进 Git，或放进公开截图。**
+   参考 [Trello 官方授权文档](https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/)。
+3. 将 Trello 授权页面显示的 Token 复制到 AstrBot 插件设置的 `token`，保存并重载。**不要把 Token 发给 Bot、提交进 Git，或放进公开截图。** Token 到期或被撤销后，再发送 `/trello 授权` 重新授权并手动更新配置。
 4. 以 **AstrBot 管理员身份私聊** Bot，发送 `/trello 工作区`，把选中项目的 ID 填入 `workspace_id`，保存 / 重载。
 5. 发送 `/trello 看板`，把所选看板 ID 填入 `board_id`，保存 / 重载。也可以填写 `https://trello.com/b/短代码/看板名` 形式的看板链接。
 6. 发送 `/trello 检查`，核对工作区和看板。此命令只读取，不会提前创建 `reminder`；实际写权限以确认提交结果为准。
@@ -97,6 +105,7 @@ Bot：已创建 Trello 卡片。
 | `取消`、`/trello 取消` | 删除本地草稿和缓存图片，不删除已提交卡片 |
 | `/trello 状态` | 查看当前草稿，或最近一次提交回执 |
 | `/trello 核对` | 对结果未决的提交只读核对，不自动补写 |
+| `/trello 授权`、`/trello 登录`、`/trello auth` | 仅管理员私聊：提供 Key 申请地址；已填 Key 时生成授权链接，Token 需手动填入设置 |
 | `/trello 工作区` | 管理员查询当前授权账号的工作区，最多显示前 50 项 |
 | `/trello 看板` | 管理员查询已配置工作区下开放的看板，最多显示前 50 项 |
 | `/trello 检查` | 管理员检查授权可读性、工作区 / 看板归属 |
@@ -164,7 +173,7 @@ python -m ruff check .
 python -m ruff format --check .
 ```
 
-当前有 **78 项自动化测试**，涵盖中文触发、草稿校验、权限 / 会话隔离、版本确认、并发防重、异常回执、工作区归属、列表复用、API 错误脱敏、分页核对、图片大小 / SSRF / 重定向、模型视觉降级和当前模型接口。另有本机 loopback HTTP 夹具实际验证流式响应、图片下载和 multipart 上传，不访问真实 Trello。
+当前有 **87 项自动化测试**，涵盖授权链接生成 / 参数编码 / 管理员私聊限制、中文触发、草稿校验、权限 / 会话隔离、版本确认、并发防重、异常回执、工作区归属、列表复用、API 错误脱敏、分页核对、图片大小 / SSRF / 重定向、模型视觉降级和当前模型接口。另有本机 loopback HTTP 夹具实际验证流式响应、图片下载和 multipart 上传，不访问真实 Trello。
 
 测试使用最小 AstrBot SDK 替身和模拟 API / 模型；**尚未使用真实 Trello 凭据与运行中的 AstrBot 做端到端联调**，不等同于平台兼容性或模型识图准确率保证。
 

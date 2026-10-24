@@ -50,7 +50,9 @@ class TrelloClient:
 
     async def request(self, method: str, path: str, *, params: dict | None = None, data=None):
         if not self.key or not self.token:
-            raise TrelloError("请先在插件设置填写 Trello API Key 和 Token。")
+            raise TrelloError(
+                "请先在插件设置填写 Trello API Key 和 Token；管理员可私聊 /trello 授权 获取申请地址与授权链接。"
+            )
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self.timeout), trust_env=False
@@ -62,7 +64,7 @@ class TrelloClient:
             ) as response:
                 if response.status < 200 or response.status >= 300:
                     hints = {
-                        401: "授权失效，请检查 API Key/Token。",
+                        401: "授权失效，请检查 API Key/Token；管理员可私聊 /trello 授权 重新获取授权链接。",
                         403: "没有工作区或看板的读写权限。",
                         404: "目标不存在或当前账号无权访问。",
                         429: "请求过于频繁，请稍后再试。",
