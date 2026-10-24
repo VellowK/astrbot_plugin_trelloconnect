@@ -1,0 +1,7 @@
+name: astrbot_plugin_trelloconnect
+display_name: Trello Connect
+desc: "用自然语言创建 Trello 待办：AI 总结任务、时间和清单，支持图片附件、多轮修改与确认提交，统一归档 reminder 列表。"
+version: 0.1.0
+author: VellowK
+repo: https://github.com/VellowK/astrbot_plugin_trelloconnect
+astrbot_version: ">=4.5.7"

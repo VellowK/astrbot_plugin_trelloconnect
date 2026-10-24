@@ -1,0 +1,20 @@
+{
+  "api_key": {"description": "Trello API Key", "type": "string", "default": "", "hint": "从 Trello Power-Up 管理页面获取。不要在聊天或截图中公开。"},
+  "token": {"description": "Trello 用户 Token", "type": "string", "default": "", "hint": "经 Trello 授权页面生成，需 read,write 权限。保存在 AstrBot 本地配置，勿提交到仓库。"},
+  "workspace_id": {"description": "工作区 ID 或短名称", "type": "string", "default": "", "hint": "先填写 API Key/Token，管理员私聊 /trello 工作区 查询。"},
+  "board_id": {"description": "看板 ID 或链接", "type": "string", "default": "", "hint": "指定工作区后，管理员 /trello 看板 查询。支持 https://trello.com/b/短代码/名称；必须属于指定工作区。首次正式确认时复用或自动创建 reminder 列表。"},
+  "timezone": {"description": "任务时间所在时区", "type": "string", "default": "Asia/Shanghai", "hint": "IANA 时区，如 Asia/Shanghai。自动记录时间；截止时间由用户消息明确指定，不擅自补时刻。"},
+  "allowed_users": {"description": "允许使用的普通用户", "type": "list", "default": [], "hint": "空列表仅允许 AstrBot 管理员。填写发送者 ID，或 平台实例ID:发送者ID。所有人共用此 Trello 账号，不是每个聊天用户独立登录。"},
+  "natural_language": {"description": "中文模糊创建意图", "type": "bool", "default": true, "hint": "支持 创建待办/创建代办/创建trello卡片 等开头请求；关闭后用 /trello 创建。不会扫描所有聊天内容让模型判断。"},
+  "vision_enabled": {"description": "使用当前会话模型识图", "type": "bool", "default": true, "hint": "要求模型支持视觉；识图请求失败会改用纯文本并提示按编号选附件。图片会发送给模型服务；不支持识图时建议关闭。"},
+  "enable_group": {"description": "允许群聊使用", "type": "bool", "default": false, "hint": "默认仅私聊。开启后草稿、修改、卡片链接会回复到原群聊，请注意隐私。"},
+  "group_require_at": {"description": "群聊自然语言创建需要唤醒", "type": "bool", "default": true, "hint": "首次自然语言创建需 @ 或唤醒词；显式 /trello 指令及同一用户草稿后续消息不受限制。"},
+  "draft_timeout_minutes": {"description": "草稿/后续内容等待超时（分钟）", "type": "int", "default": 20, "slider": {"min": 5, "max": 120, "step": 5}, "hint": "按最后一次交互计时；超时或重载后草稿失效，图片缓存被清理。持久化提交回执不受此影响。"},
+  "max_images": {"description": "每个草稿最多图片数", "type": "int", "default": 5, "slider": {"min": 1, "max": 10, "step": 1}},
+  "max_image_mb": {"description": "单张图片大小上限（MiB）", "type": "int", "default": 5, "slider": {"min": 1, "max": 10, "step": 1}, "hint": "仅 PNG/JPEG/GIF/WebP；默认 5 MiB，最高 10 MiB。还受模型及 Trello 账号附件限制。"},
+  "max_active_drafts": {"description": "同时保留草稿数", "type": "int", "default": 20, "slider": {"min": 1, "max": 100, "step": 1}},
+  "request_timeout": {"description": "单次网络请求超时（秒）", "type": "int", "default": 40, "slider": {"min": 10, "max": 120, "step": 5}},
+  "model_timeout": {"description": "单次模型调用超时（秒）", "type": "int", "default": 90, "slider": {"min": 15, "max": 180, "step": 5}},
+  "model_cooldown_seconds": {"description": "同一用户模型请求间隔（秒）", "type": "int", "default": 2, "slider": {"min": 0, "max": 60, "step": 1}},
+  "allow_private_images": {"description": "允许内网图片下载（高风险）", "type": "bool", "default": false, "hint": "默认阻止私网、回环、链路本地及 DNS 解析到内网的图片地址；仅自托管适配器确实需要且信任消息来源时开启。仅影响图片组件下载，不读取正文路径。"}
+}

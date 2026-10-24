@@ -1,0 +1,133 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from tests.support import draft_json, load
+
+intent = load("intent")
+models = load("models")
+storage = load("storage")
+
+
+class IntentTests(unittest.TestCase):
+    def test_natural_creation(self):
+        for text in [
+            "创建代办：买牛奶",
+            "帮我创建待办：整理数据",
+            "请帮我创建trello卡片：周五交付",
+            "新建一条待办",
+            "麻烦添加一个Trello卡片，交报告",
+            "把这条消息放到trello",
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(intent.parse_intent(text).action, "create")
+
+    def test_no_substring_triggers(self):
+        for text in [
+            "不要创建待办",
+            "你知道怎么创建trello卡片吗",
+            "他说创建待办很好用",
+            "今天的日程很满",
+            "确认创建 ABCDEF-1，但是日期不对",
+        ]:
+            with self.subTest(text=text):
+                self.assertIsNone(intent.parse_intent(text))
+
+    def test_confirmation_requires_version(self):
+        self.assertEqual(intent.parse_intent("确认创建 abcdef-2").text, "ABCDEF-2")
+        self.assertEqual(intent.parse_intent("确认").action, "confirmation_hint")
+
+    def test_commands(self):
+        self.assertEqual(intent.parse_intent("/trello 创建 交付报告").text, "交付报告")
+        self.assertEqual(intent.parse_intent("/trello 核对").action, "reconcile")
+        self.assertEqual(intent.parse_intent("/trello 确认 ABCDEF-1").action, "confirm")
+        self.assertIsNone(intent.parse_intent("/trellox 创建"))
+
+
+class DraftTests(unittest.TestCase):
+    def parse(self, **kwargs):
+        return models.parse_draft(json.dumps(draft_json(**kwargs)), [1, 2])
+
+    def test_valid(self):
+        draft = self.parse(
+            image_ids=[2, 2], due="2026-10-25T15:00:00+08:00", due_note="明天下午3点"
+        )
+        self.assertEqual(draft.image_ids, [2])
+        self.assertTrue(draft.due.endswith("+08:00"))
+
+    def test_code_fence(self):
+        self.assertEqual(
+            models.parse_draft("```json\n" + json.dumps(draft_json()) + "\n```", []).title,
+            "提交报告",
+        )
+
+    def test_invalid_types_and_bounds(self):
+        invalid = [
+            {"title": ""},
+            {"description": "a" * 6001},
+            {"checklist": []},
+            {"checklist": [True]},
+            {"image_ids": [3]},
+            {"image_ids": [True]},
+            {"image_ids": "1"},
+            {"due": "2026-10-25"},
+            {"due": "2026-10-25T15:00:00", "due_note": "明天"},
+            {"due": "2026-10-25T15:00:00+08:00"},
+            {"questions": "问题"},
+        ]
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(models.DraftError):
+                self.parse(**values)
+
+    def test_nul_only_required_fields_rejected(self):
+        for values in [{"title": "\x00"}, {"description": "\x00"}, {"checklist": ["\x00"]}]:
+            with self.subTest(values=values), self.assertRaises(models.DraftError):
+                self.parse(**values)
+
+    def test_model_cannot_authorize_or_select_paths(self):
+        draft = self.parse(confirmed=True, authorized=True, url="http://127.0.0.1/private")
+        self.assertFalse(hasattr(draft, "confirmed"))
+        with self.assertRaises(models.DraftError):
+            models.parse_draft("not json", [])
+
+    def test_preview_and_description(self):
+        draft = self.parse()
+        preview = models.render_draft(
+            draft, "ABCDEF-1", "2026-10-24T12:00:00+08:00", "团队 / 项目", [], []
+        )
+        self.assertIn("确认创建 ABCDEF-1", preview)
+        self.assertIn("截止时间：未设置", preview)
+        self.assertIn("astrbot-operation:op1", models.card_description(draft, "time", "op1"))
+
+
+class StoreTests(unittest.TestCase):
+    def test_durable_scoped_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = storage.ReceiptStore(root)
+            self.assertIsNone(store.get("alice"))
+            store.save("alice", {"operation": "a", "phase": "creating", "board_id": "b" * 24})
+            self.assertEqual(storage.ReceiptStore(root).get("alice")["phase"], "creating")
+            self.assertIsNone(store.get("bob"))
+            self.assertFalse(any("alice" in p.name for p in root.iterdir()))
+
+    def test_structurally_corrupt_receipt_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = storage.ReceiptStore(Path(directory))
+            for value in [
+                {"phase": "unknown"},
+                {"phase": "typo", "operation": "op", "board_id": "b" * 24},
+                {"phase": ["creating"]},
+                {"phase": 1},
+            ]:
+                store._path("alice").write_text(json.dumps(value))
+                with self.assertRaises(OSError):
+                    store.get("alice")
+
+    def test_corrupt_receipt_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = storage.ReceiptStore(Path(directory))
+            store._path("alice").write_text("bad json")
+            with self.assertRaises(OSError):
+                store.get("alice")
