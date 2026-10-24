@@ -219,6 +219,8 @@ class TrelloConnectPlugin(Star):
     ) -> str:
         action = intent.action
         if action == "help":
+            if event.is_admin() and event.is_private_chat():
+                return HELP + "\n\n" + authorization_help(str(self.config.get("api_key", "")))
             return HELP
         if action == "cancel":
             self._drop(scope)

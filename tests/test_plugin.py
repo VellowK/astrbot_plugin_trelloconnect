@@ -31,6 +31,57 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     def state(self, sender="alice", umo="test:FriendMessage:alice"):
         return self.bot.states[json.dumps([umo, sender], ensure_ascii=False)]
 
+    async def test_admin_help_includes_authorization_link_without_token(self):
+        self.bot.config.update(api_key="demo-key", token="private-test-token")
+        for command in ["/trello", "/trello 帮助", "/trello help"]:
+            with self.subTest(command=command):
+                response, event = await self.send(command)
+                self.assertIn(plugin.HELP, response)
+                self.assertIn("https://trello.com/1/authorize?", response)
+                self.assertIn("key=demo-key", response)
+                self.assertNotIn("private-test-token", response)
+                self.assertNotIn("&token=", response)
+                self.assertFalse(event.llm)
+                self.assertTrue(event.stopped)
+        self.bot.client.verify.assert_not_awaited()
+        self.bot.client.create_card.assert_not_awaited()
+        self.bot.summarizer.generate.assert_not_awaited()
+        self.assertFalse(self.bot.states)
+
+    async def test_admin_help_without_key_explains_application(self):
+        response, _ = await self.send("/trello")
+        self.assertIn("https://trello.com/apps/admin", response)
+        self.assertIn("先把 Key 填入", response)
+        self.assertNotIn("/1/authorize?", response)
+        self.bot.client.verify.assert_not_awaited()
+
+    async def test_allowed_nonadmin_help_does_not_include_authorization_link(self):
+        self.bot.config.update(api_key="demo-key", allowed_users=["alice"])
+        response, _ = await self.send("/trello", admin=False)
+        self.assertEqual(response, plugin.HELP)
+        self.assertNotIn("demo-key", response)
+        self.assertNotIn("/1/authorize?", response)
+
+    async def test_admin_group_help_does_not_include_authorization_link(self):
+        self.bot.config.update(api_key="demo-key", enable_group=True)
+        response, _ = await self.send("/trello", private=False)
+        self.assertEqual(response, plugin.HELP)
+        self.assertNotIn("demo-key", response)
+        self.assertNotIn("/1/authorize?", response)
+
+    async def test_help_preserves_existing_draft(self):
+        await self.send("创建待办：交报告")
+        original = self.state()
+        code = original.code
+        self.bot.summarizer.generate.reset_mock()
+        self.bot.client.verify.reset_mock()
+        await self.send("/trello")
+        self.assertIs(self.state(), original)
+        self.assertEqual(self.state().code, code)
+        self.bot.summarizer.generate.assert_not_awaited()
+        self.bot.client.verify.assert_not_awaited()
+        self.bot.client.create_card.assert_not_awaited()
+
     async def test_authorization_without_credentials(self):
         response, event = await self.send("/trello 授权")
         self.assertIn("https://trello.com/apps/admin", response)
