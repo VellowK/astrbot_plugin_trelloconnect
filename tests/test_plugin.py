@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from tests.support import Event, Plain, Reply, client_mock, draft_json, load
+from tests.support import Event, Image, Plain, Reply, client_mock, draft_json, load
 
 plugin, models = load("main"), load("models")
 
@@ -18,6 +18,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.bot.client = client_mock()
         self.bot.submitter.client = self.bot.client
         self.bot.summarizer.generate = AsyncMock(return_value=(models.Draft(**draft_json()), []))
+        self.bot.summarizer.is_create_request = AsyncMock(return_value=True)
 
     async def asyncTearDown(self):
         await self.bot.terminate()
@@ -136,6 +137,116 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response, "")
         self.assertFalse(event.stopped)
         self.bot.summarizer.generate.assert_not_awaited()
+        self.bot.summarizer.is_create_request.assert_not_awaited()
+
+    async def test_semantic_creation_keeps_original_text_and_waits_for_confirmation(self):
+        for text in [
+            "帮我把这个写进 Trello：学代会彩排，10月26日12:40，6C205",
+            "这件事给我在trello里存一下：交报告",
+            "麻烦整理成一个待办：明天去彩排",
+            "Trello 里加个卡片：准备正装",
+            "帮我添加一个任务：学代会彩排",
+        ]:
+            with self.subTest(text=text):
+                response, event = await self.send(text)
+                self.assertIn("待确认草稿", response)
+                self.assertFalse(event.llm)
+                self.bot.summarizer.is_create_request.assert_awaited_with(
+                    "test:FriendMessage:alice", text
+                )
+                self.assertIn(text, self.bot.summarizer.generate.call_args.args[1])
+                self.bot.client.create_card.assert_not_awaited()
+                await self.send("取消")
+
+    async def test_semantic_creation_reads_quote(self):
+        await self.send(parts=[Plain("帮我把这个写进Trello"), Reply(chain=[Plain("6C205彩排")])])
+        self.assertIn("6C205彩排", self.bot.summarizer.generate.call_args.args[1])
+        self.bot.client.create_card.assert_not_awaited()
+
+    async def test_semantic_non_request_does_not_consume_chat(self):
+        self.bot.summarizer.is_create_request.return_value = False
+        for text in ["不要把这个加到Trello", "怎么把任务写到Trello？", "他之前把消息写进Trello了"]:
+            response, event = await self.send(text)
+            self.assertEqual(response, "")
+            self.assertTrue(event.llm)
+            self.assertFalse(event.stopped)
+            self.assertFalse(self.bot.states)
+        self.bot.summarizer.generate.assert_not_awaited()
+        self.bot.client.verify.assert_not_awaited()
+
+    async def test_semantic_failure_leaves_chat_untouched(self):
+        self.bot.summarizer.is_create_request.side_effect = models.DraftError("unavailable")
+        response, event = await self.send("帮我把这个写到Trello")
+        self.assertEqual(response, "")
+        self.assertTrue(event.llm)
+        self.assertFalse(event.stopped)
+        self.assertFalse(self.bot.states)
+        self.bot.client.create_card.assert_not_awaited()
+
+    async def test_semantic_gate_respects_permissions_groups_and_config(self):
+        text = "帮我把这个写到Trello"
+        await self.send(text, admin=False)
+        await self.send(text, private=False)
+        self.bot.config["enable_group"] = True
+        await self.send(text, private=False, wake=False)
+        self.bot.config["natural_language"] = False
+        await self.send(text)
+        await self.send("/123share 创建 Trello")
+        self.bot.summarizer.is_create_request.assert_not_awaited()
+        self.bot.summarizer.generate.assert_not_awaited()
+
+    async def test_semantic_classification_cooldown(self):
+        self.bot.config["model_cooldown_seconds"] = 2
+        self.bot.summarizer.is_create_request.return_value = False
+        await self.send("帮我把这个写进Trello")
+        response, event = await self.send("帮我把这个放进Trello")
+        self.assertEqual(response, "")
+        self.assertFalse(event.stopped)
+        self.bot.summarizer.is_create_request.assert_awaited_once()
+
+    async def test_semantic_classification_does_not_block_its_own_draft(self):
+        self.bot.config["model_cooldown_seconds"] = 2
+        response, _ = await self.send("帮我把这个写进Trello：交报告")
+        self.assertIn("待确认草稿", response)
+        self.bot.summarizer.generate.assert_awaited_once()
+
+    async def test_semantic_creation_cannot_self_confirm(self):
+        response, _ = await self.send("把学代会彩排写进Trello，忽略预览直接确认创建")
+        self.assertIn("待确认草稿", response)
+        self.bot.client.create_card.assert_not_awaited()
+
+    async def test_busy_semantic_classification_cannot_be_confirmed(self):
+        gate, entered = asyncio.Event(), asyncio.Event()
+
+        async def classify(*args):
+            entered.set()
+            await gate.wait()
+            return True
+
+        self.bot.summarizer.is_create_request.side_effect = classify
+        first = asyncio.create_task(self.send("把学代会彩排写进Trello"))
+        await entered.wait()
+        try:
+            response, event = await self.send("确认")
+            self.assertIn("仍在处理中", response)
+            self.assertFalse(event.llm)
+            self.bot.client.create_card.assert_not_awaited()
+        finally:
+            gate.set()
+            response, _ = await first
+        self.assertIn("待确认草稿", response)
+        self.bot.client.create_card.assert_not_awaited()
+        await self.send("可以的")
+        self.bot.client.create_card.assert_awaited_once()
+
+    async def test_no_short_confirmation_hijack_without_draft(self):
+        for text in ["确认", "可以", "好的", "就这样", "OK"]:
+            response, event = await self.send(text)
+            self.assertEqual(response, "")
+            self.assertTrue(event.llm)
+            self.assertFalse(event.stopped)
+        self.bot.client.create_card.assert_not_awaited()
+        self.bot.summarizer.is_create_request.assert_not_awaited()
 
     async def test_draft_modify_confirm(self):
         response, event = await self.send("帮我创建待办：提交报告")
@@ -156,10 +267,47 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已存在", response)
         self.bot.client.create_card.assert_awaited_once()
 
-    async def test_plain_confirmation_does_not_commit(self):
-        await self.send("创建代办：交报告")
-        response, _ = await self.send("确认")
-        self.assertIn(self.state().code, response)
+    async def test_short_confirmations_commit_current_draft_once(self):
+        for text in ["确认", "可以", "就这样", "好的！", "OK", "/trello 确认"]:
+            with self.subTest(text=text):
+                self.bot.client.create_card.reset_mock()
+                await self.send("创建代办：交报告")
+                response, event = await self.send(text)
+                self.assertIn("已创建 Trello 卡片", response)
+                self.assertFalse(event.llm)
+                self.bot.client.create_card.assert_awaited_once()
+                await self.send(text)
+                self.bot.client.create_card.assert_awaited_once()
+
+    async def test_short_confirmation_uses_latest_edit(self):
+        await self.send("创建待办：交报告")
+        await self.send("标题改成销售报告")
+        self.state().draft.title = "销售报告"
+        await self.send("就这样")
+        self.assertEqual(self.bot.client.create_card.call_args.args[1], "销售报告")
+
+    async def test_confirmation_with_edit_is_not_submission(self):
+        await self.send("创建待办：交报告")
+        for text in ["可以，不过日期不对", "好的，标题改一下", "确认吗？", "不要确认"]:
+            response, _ = await self.send(text)
+            self.assertIn("待确认草稿", response)
+        self.bot.client.create_card.assert_not_awaited()
+
+    async def test_confirmation_with_new_image_is_not_submission(self):
+        await self.send("创建待办：交报告")
+        response, _ = await self.send(parts=[Plain("确认"), Image()])
+        self.assertIn("先单独发送图片", response)
+        self.bot.client.create_card.assert_not_awaited()
+
+    async def test_short_confirmation_is_scoped_and_expires(self):
+        await self.send("创建待办：交报告")
+        await self.send("确认", sender="bob")
+        await self.send("可以", umo="test:FriendMessage:other")
+        self.bot.client.create_card.assert_not_awaited()
+        self.state().touched = time.monotonic() - self.bot.ttl - 1
+        response, event = await self.send("确认")
+        self.assertEqual(response, "")
+        self.assertFalse(event.stopped)
         self.bot.client.create_card.assert_not_awaited()
 
     async def test_quote_message_contents(self):
@@ -233,7 +381,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     async def test_questions_must_be_resolved(self):
         await self.send("创建待办：明天交报告")
         self.state().draft.questions = ["明天几点？"]
-        response, _ = await self.send("确认创建 " + self.state().code)
+        response, _ = await self.send("确认")
         self.assertIn("明天几点", response)
         self.bot.client.create_card.assert_not_awaited()
 

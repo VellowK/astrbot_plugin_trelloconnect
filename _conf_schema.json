@@ -5,7 +5,7 @@
   "board_id": {"description": "看板 ID 或链接", "type": "string", "default": "", "hint": "指定工作区后，管理员 /trello 看板 查询。支持 https://trello.com/b/短代码/名称；必须属于指定工作区。首次正式确认时复用或自动创建 reminder 列表。"},
   "timezone": {"description": "任务时间所在时区", "type": "string", "default": "Asia/Shanghai", "hint": "IANA 时区，如 Asia/Shanghai。自动记录时间；截止时间由用户消息明确指定，不擅自补时刻。"},
   "allowed_users": {"description": "允许使用的普通用户", "type": "list", "default": [], "hint": "空列表仅允许 AstrBot 管理员。填写发送者 ID，或 平台实例ID:发送者ID。所有人共用此 Trello 账号，不是每个聊天用户独立登录。"},
-  "natural_language": {"description": "中文模糊创建意图", "type": "bool", "default": true, "hint": "支持 创建待办/创建代办/创建trello卡片 等开头请求；关闭后用 /trello 创建。不会扫描所有聊天内容让模型判断。"},
+  "natural_language": {"description": "中文模糊创建意图", "type": "bool", "default": true, "hint": "支持 帮我记个待办/把这个写进Trello/整理成待办 等说法。规则未命中时，仅对任务相关候选消息调用当前会话模型识别意图（额外一次请求，最多15秒），不扫描全部聊天。关闭后用 /trello 创建。草稿确认回复 确认/可以/就这样 即可，无需编号。"},
   "vision_enabled": {"description": "使用当前会话模型识图", "type": "bool", "default": true, "hint": "要求模型支持视觉；识图请求失败会改用纯文本并提示按编号选附件。图片会发送给模型服务；不支持识图时建议关闭。"},
   "enable_group": {"description": "允许群聊使用", "type": "bool", "default": false, "hint": "默认仅私聊。开启后草稿、修改、卡片链接会回复到原群聊，请注意隐私。"},
   "group_require_at": {"description": "群聊自然语言创建需要唤醒", "type": "bool", "default": true, "hint": "首次自然语言创建需 @ 或唤醒词；显式 /trello 指令及同一用户草稿后续消息不受限制。"},

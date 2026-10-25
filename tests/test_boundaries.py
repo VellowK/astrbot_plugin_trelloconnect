@@ -327,6 +327,56 @@ class SummarizerTests(unittest.IsolatedAsyncioTestCase):
             self.now,
         )
 
+    async def test_intent_uses_current_provider_without_tools_or_history(self):
+        self.context.llm_generate.return_value = types.SimpleNamespace(
+            completion_text='{"action":"create"}'
+        )
+        self.assertTrue(await self.service.is_create_request("current:umo", "帮我写进Trello"))
+        self.context.get_current_chat_provider_id.assert_awaited_once_with("current:umo")
+        params = self.context.llm_generate.call_args.kwargs
+        self.assertEqual(params["chat_provider_id"], "current-provider")
+        self.assertIsNone(params["tools"])
+        self.assertEqual(params["image_urls"], [])
+        self.assertNotIn("contexts", params)
+        self.assertEqual(json.loads(params["prompt"]), {"text": "帮我写进Trello"})
+
+    async def test_intent_only_accepts_bounded_creation_decision(self):
+        for output in [
+            '{"action":"none"}',
+            "[]",
+            "null",
+            '{"action":"confirm"}',
+            '{"action":"create","confirmed":true}',
+            "not json",
+            "x" * 257,
+            123,
+        ]:
+            with self.subTest(output=str(output)[:40]):
+                self.context.llm_generate.return_value = types.SimpleNamespace(
+                    completion_text=output
+                )
+                self.assertFalse(await self.service.is_create_request("umo", "Trello里加一个"))
+        self.context.llm_generate.return_value = types.SimpleNamespace(
+            completion_text='```json\n{"action":"create"}\n```'
+        )
+        self.assertTrue(await self.service.is_create_request("umo", "Trello里加一个"))
+
+    async def test_intent_failure_is_redacted(self):
+        self.context.llm_generate.side_effect = RuntimeError("secret-token")
+        with self.assertRaises(models.DraftError) as caught:
+            await self.service.is_create_request("umo", "添加到Trello")
+        self.assertNotIn("secret-token", str(caught.exception))
+
+    async def test_intent_timeout_is_bounded(self):
+        self.service.timeout = 0.001
+
+        async def slow(**kwargs):
+            await asyncio.sleep(10)
+
+        self.context.llm_generate.side_effect = slow
+        with self.assertRaises(models.DraftError):
+            await self.service.is_create_request("umo", "添加到Trello")
+
     async def test_current_provider_no_tools_and_no_shared_history(self):
         draft, warnings = await self.generate()
         self.assertEqual(draft.title, "提交报告")
