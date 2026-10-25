@@ -85,6 +85,12 @@ def draft_json(**overrides):
 
 
 def client_mock():
+    async def verify_content(card_id, expected):
+        return {
+            "description": "verified",
+            "checklist": "verified" if expected.get("checklist") else "not_requested",
+        }
+
     return types.SimpleNamespace(
         verify=AsyncMock(return_value=target()),
         ensure_reminder=AsyncMock(return_value="c" * 24),
@@ -93,6 +99,7 @@ def client_mock():
         ),
         add_checklist=AsyncMock(),
         add_picture=AsyncMock(),
+        verify_content=AsyncMock(side_effect=verify_content),
         find_operation=AsyncMock(return_value=[]),
         close=AsyncMock(),
     )

@@ -1,6 +1,8 @@
 """Trello API boundary: fixed origin, redacted errors, no write retries."""
 
 import asyncio
+import hashlib
+import json
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -33,6 +35,26 @@ def card_link(card: dict) -> str:
     return "https://trello.com/c/" + str(card.get("id", ""))
 
 
+def content_fingerprints(description: str, items: list[str]) -> dict:
+    """Keep only comparison digests in receipts, never the task text itself."""
+    normalized = description.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return {
+        "description": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+        "checklist": hashlib.sha256(
+            json.dumps(sorted(items), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        if items
+        else None,
+    }
+
+
+def content_verified(result: dict) -> bool:
+    return result.get("description") == "verified" and result.get("checklist") in {
+        "verified",
+        "not_requested",
+    }
+
+
 class TrelloClient:
     BASE = "https://api.trello.com/1"
 
@@ -48,7 +70,9 @@ class TrelloClient:
             await self.session.close()
             self.session = None
 
-    async def request(self, method: str, path: str, *, params: dict | None = None, data=None):
+    async def request(
+        self, method: str, path: str, *, params: dict | None = None, data=None, json_data=None
+    ):
         if not self.key or not self.token:
             raise TrelloError(
                 "请先在插件设置填写 Trello API Key 和 Token；管理员可私聊 /trello 授权 获取申请地址与授权链接。"
@@ -60,7 +84,12 @@ class TrelloClient:
         query = {**(params or {}), "key": self.key, "token": self.token}
         try:
             async with self.session.request(
-                method, self.BASE + path, params=query, data=data, allow_redirects=False
+                method,
+                self.BASE + path,
+                params=query,
+                data=data,
+                allow_redirects=False,
+                **({"json": json_data} if json_data is not None else {}),
             ) as response:
                 if response.status < 200 or response.status >= 300:
                     hints = {
@@ -81,8 +110,6 @@ class TrelloClient:
                         raise TrelloError(
                             "Trello 响应过大，请到看板手动核对。", uncertain=method != "GET"
                         )
-                import json
-
                 try:
                     return json.loads(raw)
                 except (ValueError, UnicodeDecodeError):
@@ -166,7 +193,7 @@ class TrelloClient:
         result = await self.request(
             "POST",
             "/cards",
-            data={
+            json_data={
                 "idList": list_id,
                 "name": title,
                 "desc": description,
@@ -178,18 +205,72 @@ class TrelloClient:
         return result
 
     async def add_checklist(self, card_id: str, items: list[str]):
+        if not items:
+            return
         checklist = await self.request(
             "POST",
             f"/cards/{resource_id(card_id)}/checklists",
-            data={"name": "任务清单", "pos": "bottom"},
+            json_data={"name": "任务清单", "pos": "bottom"},
         )
         checklist_id = self.object_id(checklist, uncertain=True)
         for item in items:
             await self.request(
                 "POST",
                 f"/checklists/{checklist_id}/checkItems",
-                data={"name": item, "pos": "bottom", "checked": "false"},
+                json_data={"name": item, "pos": "bottom", "checked": False},
             )
+
+    async def verify_content(self, card_id: str, expected: dict) -> dict:
+        """Read back description and checklist; a 2xx write alone is not proof of content."""
+        card_id = resource_id(card_id)
+        result = {
+            "description": "unverified",
+            "checklist": "unverified" if expected.get("checklist") else "not_requested",
+        }
+        try:
+            card = await self.request("GET", f"/cards/{card_id}", params={"fields": "desc"})
+            if (
+                isinstance(card, dict)
+                and card.get("id") == card_id
+                and isinstance(card.get("desc"), str)
+            ):
+                digest = content_fingerprints(card["desc"], [])["description"]
+                result["description"] = (
+                    "verified" if digest == expected.get("description") else "mismatch"
+                )
+        except TrelloError:
+            pass
+        if not expected.get("checklist"):
+            return result
+        try:
+            checklists = await self.request(
+                "GET", f"/cards/{card_id}/checklists", params={"checkItems": "all"}
+            )
+            if not isinstance(checklists, list):
+                return result
+            valid = True
+            for checklist in checklists:
+                if not isinstance(checklist, dict):
+                    valid = False
+                    continue
+                if checklist.get("name") != "任务清单":
+                    continue
+                items = checklist.get("checkItems")
+                if not isinstance(items, list) or any(
+                    not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                    for item in items
+                ):
+                    valid = False
+                    continue
+                digest = content_fingerprints("", [item["name"] for item in items])["checklist"]
+                if digest == expected["checklist"]:
+                    result["checklist"] = "verified"
+                    return result
+            if valid:
+                result["checklist"] = "mismatch"
+        except TrelloError:
+            pass
+        return result
 
     async def add_picture(self, card_id: str, path: Path, name: str, mime: str):
         with path.open("rb") as stream:

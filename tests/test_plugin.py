@@ -32,6 +32,42 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     def state(self, sender="alice", umo="test:FriendMessage:alice"):
         return self.bot.states[json.dumps([umo, sender], ensure_ascii=False)]
 
+    async def test_simple_activity_accepts_no_checklist_and_confirms_once(self):
+        self.bot.summarizer.generate.return_value = (
+            models.Draft(
+                **draft_json(
+                    title="参加学代会彩排", description="地点：牛津布鲁克斯学院6C205", checklist=[]
+                )
+            ),
+            [],
+        )
+        preview, _ = await self.send("帮我创建待办：明天12:40在6C205参加学代会彩排")
+        self.assertIn("v0.1.4", preview)
+        self.assertIn("任务清单：无（不创建）", preview)
+        self.bot.client.create_card.assert_not_awaited()
+        response, _ = await self.send("确认")
+        self.assertIn("已创建 Trello 卡片", response)
+        self.assertIn("描述：已回读核对", response)
+        self.assertIn("任务清单：不需要", response)
+        self.bot.client.add_checklist.assert_not_awaited()
+        self.bot.client.create_card.assert_awaited_once()
+
+    async def test_description_mismatch_is_shown_instead_of_complete_success(self):
+        self.bot.client.verify_content.side_effect = None
+        self.bot.client.verify_content.return_value = {
+            "description": "mismatch",
+            "checklist": "verified",
+        }
+        await self.send("创建待办：交报告")
+        response, _ = await self.send("就这样")
+        self.assertIn("内容写入或核验尚未完成", response)
+        self.assertIn("描述：缺失或与草稿不一致", response)
+        self.assertNotIn("已创建 Trello 卡片。", response)
+        self.assertIn("trello.com/c/", response)
+        await self.send("/trello 核对")
+        self.bot.client.create_card.assert_awaited_once()
+        self.bot.client.add_checklist.assert_awaited_once()
+
     async def test_admin_help_includes_authorization_link_without_token(self):
         self.bot.config.update(api_key="demo-key", token="private-test-token")
         for command in ["/trello", "/trello 帮助", "/trello help"]:

@@ -15,6 +15,7 @@ from astrbot.api.message_components import Image, Plain, Reply
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from . import VERSION
 from .authorization import authorization_help
 from .images import ImageError, ImageStager
 from .intent import Intent, is_creation_candidate, parse_intent
@@ -24,7 +25,7 @@ from .submission import Submitter
 from .summarizer import Summarizer
 from .trello import TrelloClient, TrelloError
 
-HELP = """Trello Connect
+HELP = f"""Trello Connect v{VERSION}
 • 帮我创建待办：明天下午3点前提交报告，先整理数据再审核（可附图片）
 • 把这个写进 Trello / 帮我记个待办（可引用含任务/图片的消息）
 • 草稿期间直接说修改意见，或追加图片；不会直接创建。
@@ -302,7 +303,7 @@ class TrelloConnectPlugin(Star):
             return (
                 "已创建 Trello 卡片。\n"
                 if result["phase"] == "complete"
-                else "卡片已创建，但清单/图片未完整写入。\n"
+                else "卡片已创建，但内容写入或核验尚未完成，请勿重复创建。\n"
             ) + receipt_message(result)
         if action == "create":
             receipt = self.store.get(scope)

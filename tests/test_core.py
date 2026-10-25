@@ -92,7 +92,8 @@ class DraftTests(unittest.TestCase):
         invalid = [
             {"title": ""},
             {"description": "a" * 6001},
-            {"checklist": []},
+            {"checklist": "步骤"},
+            {"checklist": ["步骤"] * 21},
             {"checklist": [True]},
             {"image_ids": [3]},
             {"image_ids": [True]},
@@ -107,7 +108,7 @@ class DraftTests(unittest.TestCase):
                 self.parse(**values)
 
     def test_nul_only_required_fields_rejected(self):
-        for values in [{"title": "\x00"}, {"description": "\x00"}, {"checklist": ["\x00"]}]:
+        for values in [{"title": "\x00"}, {"checklist": ["\x00"]}]:
             with self.subTest(values=values), self.assertRaises(models.DraftError):
                 self.parse(**values)
 

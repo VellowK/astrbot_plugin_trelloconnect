@@ -147,7 +147,10 @@ class TrelloTests(unittest.IsolatedAsyncioTestCase):
         await self.client.add_checklist("d" * 24, ["first", "second"])
         calls = self.client.request.call_args_list
         self.assertEqual(calls[0].args, ("POST", "/cards/" + "d" * 24 + "/checklists"))
-        self.assertEqual([call.kwargs["data"]["name"] for call in calls[1:]], ["first", "second"])
+        self.assertEqual(
+            [call.kwargs["json_data"]["name"] for call in calls[1:]], ["first", "second"]
+        )
+        self.assertIs(calls[1].kwargs["json_data"]["checked"], False)
 
     async def test_attachment_is_multipart_file_not_remote_url(self):
         with tempfile.TemporaryDirectory() as directory:

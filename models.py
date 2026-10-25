@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import VERSION
+
 
 class DraftError(ValueError):
     pass
@@ -53,10 +55,10 @@ def parse_draft(text: str, available_images: list[int]) -> Draft:
     if not isinstance(data, dict):
         raise DraftError("模型返回的草稿不是对象。")
     title = _string(data.get("title"), "标题", 160)
-    description = _string(data.get("description"), "任务描述", 6000)
+    description = _string(data.get("description", ""), "任务描述", 6000, required=False)
     items = data.get("checklist", [])
-    if not isinstance(items, list) or not 1 <= len(items) <= 20:
-        raise DraftError("模型必须返回 1～20 项任务清单。")
+    if not isinstance(items, list) or len(items) > 20:
+        raise DraftError("任务清单须为数组，最多 20 项；单一活动可不设清单。")
     checklist = list(dict.fromkeys(_string(item, "清单项", 240) for item in items))
     due = data.get("due")
     note = _string(data.get("due_note", ""), "时间依据", 300, required=False)
@@ -94,7 +96,7 @@ def render_draft(
 ) -> str:
     labels = {p.id: p.name for p in pictures}
     lines = [
-        f"Trello 待确认草稿（{code}）",
+        f"Trello 待确认草稿（{code} · v{VERSION}）",
         f"目标：{destination} / reminder",
         f"标题：{draft.title}",
         f"记录时间：{created_at}",
@@ -102,8 +104,13 @@ def render_draft(
     ]
     if draft.due_note:
         lines.append(f"时间依据：{draft.due_note}")
-    lines.extend(["", "描述：", draft.description, "", "任务清单："])
-    lines.extend(f"{i}. {item}" for i, item in enumerate(draft.checklist, 1))
+    if draft.description:
+        lines.extend(["", "描述：", draft.description])
+    if draft.checklist:
+        lines.extend(["", "任务清单："])
+        lines.extend(f"{i}. {item}" for i, item in enumerate(draft.checklist, 1))
+    else:
+        lines.append("\n任务清单：无（不创建）")
     lines.append(
         "\n将上传的图片：" + ("、".join(f"第{i}张（{labels[i]}）" for i in draft.image_ids) or "无")
     )
@@ -124,4 +131,5 @@ def render_draft(
 
 
 def card_description(draft: Draft, created_at: str, operation: str) -> str:
-    return f"{draft.description}\n\n---\n记录时间：{created_at}\n来源：AstrBot\n操作编号：astrbot-operation:{operation}"
+    metadata = f"记录时间：{created_at}\n来源：AstrBot\n操作编号：astrbot-operation:{operation}"
+    return f"{draft.description}\n\n---\n{metadata}" if draft.description else metadata
